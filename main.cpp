@@ -15,81 +15,76 @@
 	along with solidity.  If not, see <http://www.gnu.org/licenses/>.
 */
 // SPDX-License-Identifier: GPL-3.0
-#include <tools/solidityUpgrade/SourceUpgrade.h>
 
-#include <libsolutil/CommonIO.h>
-#include <libsolutil/AnsiColorized.h>
+#include <tools/yulPhaser/Exceptions.h>
+#include <tools/yulPhaser/Phaser.h>
 
-//#include <test/Common.h>
+#include <libsolutil/Exceptions.h>
 
-#include <boost/algorithm/string.hpp>
-#include <boost/algorithm/string/replace.hpp>
-#include <boost/exception/all.hpp>
-#include <boost/filesystem.hpp>
-#include <boost/program_options.hpp>
-
-#include <cstdlib>
 #include <iostream>
-#include <fstream>
-#include <queue>
-#include <regex>
-
-#if defined(_WIN32)
-#include <windows.h>
-#endif
-
-using namespace solidity;
-using namespace std;
-namespace po = boost::program_options;
-namespace fs = boost::filesystem;
-
-namespace
-{
-
-void setupTerminal()
-{
-#if defined(_WIN32) && defined(ENABLE_VIRTUAL_TERMINAL_PROCESSING)
-	// Set output mode to handle virtual terminal (ANSI escape sequences)
-	// ignore any error, as this is just a "nice-to-have"
-	// only windows needs to be taken care of, as other platforms (Linux/OSX) support them natively.
-	HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-	if (hOut == INVALID_HANDLE_VALUE)
-		return;
-
-	DWORD dwMode = 0;
-	if (!GetConsoleMode(hOut, &dwMode))
-		return;
-
-	dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-	if (!SetConsoleMode(hOut, dwMode))
-		return;
-#endif
-}
-
-}
 
 int main(int argc, char** argv)
 {
-	setupTerminal();
-
-	tools::SourceUpgrade upgrade;
-	if (!upgrade.parseArguments(argc, argv))
-		return 1;
-	upgrade.printPrologue();
-
 	try
 	{
-		if (!upgrade.processInput())
-			return 1;
+		solidity::phaser::Phaser::main(argc, argv);
+		return 0;
 	}
-	catch (boost::exception const& _exception)
+	catch (boost::program_options::error const& exception)
 	{
-		cerr << "Exception while processing input: " << boost::diagnostic_information(_exception) << endl;
+		// Bad input data. Invalid command-line parameters.
+
+		std::cerr << std::endl;
+		std::cerr << "ERROR: " << exception.what() << std::endl;
+		return 1;
+	}
+	catch (solidity::phaser::BadInput const& exception)
+	{
+		// Bad input data. Syntax errors in the input program, semantic errors in command-line
+		// parameters, etc.
+
+		std::cerr << std::endl;
+		std::cerr << "ERROR: " << exception.what() << std::endl;
+		return 1;
+	}
+	catch (solidity::util::Exception const& exception)
+	{
+		// Something's seriously wrong. Probably a bug in the program or a missing handler (which
+		// is really also a bug). The exception should have been handled gracefully by this point
+		// if it's something that can happen in normal usage. E.g. an error in the input or a
+		// failure of some part of the system that's outside of control of the application (disk,
+		// network, etc.). The bug should be reported and investigated so our job here is just to
+		// provide as much useful information about it as possible.
+
+		std::cerr << std::endl;
+		std::cerr << "UNCAUGHT EXCEPTION!" << std::endl;
+
+		// We can print some useful diagnostic info for this particular exception type.
+		std::cerr << "Location: " << exception.lineInfo() << std::endl;
+
+		char const* const* function = boost::get_error_info<boost::throw_function>(exception);
+		if (function != nullptr)
+			std::cerr << "Function: " << *function << std::endl;
+
+		// Let it crash. The terminate() will print some more stuff useful for debugging like
+		// what() and the actual exception type.
+		throw;
+	}
+	catch (std::exception const&)
+	{
+		// Again, probably a bug but this time it's just plain std::exception so there's no point
+		// in doing anything special. terminate() will do an adequate job.
+		std::cerr << std::endl;
+		std::cerr << "UNCAUGHT EXCEPTION!" << std::endl;
+		throw;
 	}
 	catch (...)
 	{
-		cerr << "Unknown exception while processing input: " << boost::current_exception_diagnostic_information() << endl;
+		// Some people don't believe these exist.
+		// I have no idea what this is and it's flying towards me so technically speaking it's an
+		// unidentified flying object.
+		std::cerr << std::endl;
+		std::cerr << "UFO SPOTTED!" << std::endl;
+		throw;
 	}
-
-	return 0;
 }
